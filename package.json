@@ -1,0 +1,29 @@
+{
+  "name": "wirejs-adapters",
+  "description": "Adapters for common application resources.",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc",
+    "test": "jest --config=jest.config.json"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/svidgen/adapters.git"
+  },
+  "author": "Jon Wire",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/svidgen/adapters/issues"
+  },
+  "homepage": "https://github.com/svidgen/adapters#readme",
+  "devDependencies": {
+    "@types/jest": "^27.0.3",
+    "jest": "^27.3.1",
+    "ts-jest": "^27.0.7",
+    "typescript": "^4.5.2"
+  },
+  "dependencies": {
+    "ulid": "^2.3.0"
+  }
+}
