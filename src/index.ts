@@ -1,28 +1,27 @@
 import { ulid } from 'ulid';
 
-export class Model {
-	public id: string;
-
-	constructor(init: JSON) {
-		Object.assign(this, init);
-		this.id = (this as any).id || ulid();
+export function validateHasId<T>(item: T, pk: string) {
+	if (typeof (item as any)[pk] === 'undefined') {
+		throw new Error(`${item} does not have the expected PK: (${pk}).`);
 	}
 }
 
-export type ModelConstructor<T extends Model> = new (init: JSON) => T;
+export class Collection<
+	PK extends string = 'id',
+	T extends {[key in PK]: any} = {[key in PK]: any} & Record<string, any>
+> {
+	validate: (item: T, pk: PK) => any;
+	pk: PK;
+	items: T[];
+	// indexes: Collection<T>[];
 
-export type CollectionInitializer<T extends Model> = {
-	model: ModelConstructor<T>;
-	items?: T[];
-	indexes?: string;
-}
-
-export class Index<T extends Model> implements CollectionInitializer<T> {
-	// @ts-ignore
-	// it actually *is* set during construction with Object.assign();
-	public model: ModelConstructor<T>;
-
-	constructor(init: CollectionInitializer<T>) {
-		Object.assign(this, init);
+	constructor({
+		validate = validateHasId,
+		pk = 'id' as PK,
+		items = []
+	}: Partial<Collection<PK, T>> = {}) {
+		this.validate = validate;
+		this.pk = pk;
+		this.items = items as T[];
 	}
 }
