@@ -25,5 +25,8 @@
   },
   "dependencies": {
     "ulid": "^2.3.0"
+  },
+  "optionalDependencies": {
+    "fsevents": "^2.3.2"
   }
 }
