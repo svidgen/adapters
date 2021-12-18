@@ -66,4 +66,29 @@ describe('Collection', () => {
 			expect(c.pk).toEqual('differentPK');
 		});
 	});
+
+	describe('can fetch', () => {
+		test('one item by id', async () => {
+			const c = new Collection({items: makeItems(['a','b','c'])});
+			expect(await c.get('a')).toEqual({
+				id: 'a',
+				name: 'a name'
+			});
+		});
+
+		test('all items in PK order as an async iterable', async () => {
+			const c = new Collection({items: makeItems(['a','c','b'])});
+
+			const results = [] as any[];
+			for await (const item of c) {
+				results.push(item);
+			}
+
+			expect(results).toEqual([
+				{id: 'a', name: 'a name'},
+				{id: 'b', name: 'b name'},
+				{id: 'c', name: 'c name'},
+			]);
+		});
+	});
 });
