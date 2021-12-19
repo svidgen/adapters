@@ -30,7 +30,7 @@ export class Collection<
 		items.forEach(item => this.put(item));
 	}
 
-	[Symbol.asyncIterator](): AsyncIterator<T> {
+	[Symbol.asyncIterator]() {
 		const keys = Array.from(this.items.keys()).sort();
 		let i = 0;
 		return {
@@ -44,8 +44,8 @@ export class Collection<
 					return result;
 				}
 				return {
-					value: undefined,
 					done: true,
+					value: null 
 				};
 			},
 		};
