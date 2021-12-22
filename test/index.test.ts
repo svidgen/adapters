@@ -90,5 +90,6 @@ describe('Collection', () => {
 				{id: 'c', name: 'c name'},
 			]);
 		});
+
 	});
 });

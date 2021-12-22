@@ -51,6 +51,9 @@ export class Collection<
 		};
 	}
 
+	// index<Out>(f: (item: T) => Out, comparison?: (a: T, b: T) => number) {
+	// }
+
 	async get(pk: string) {
 		return this.items.get(pk);
 	}
