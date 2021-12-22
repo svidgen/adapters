@@ -13,7 +13,7 @@ export function validateHasId<T>(item: T, pk: string) {
 export class Collection<
 	PK extends string = 'id',
 	T extends ModelWithPK<PK> = ModelWithPK<PK> & Record<string, any>
-> implements AsyncIterable<T> {
+> {
 	validate: (item: T, pk: PK) => any;
 	pk: PK;
 
