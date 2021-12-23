@@ -8,13 +8,13 @@ function makeItems<PK extends string = 'id'>(ids: string[], idField: PK = 'id' a
 };
 
 type Customer = {
-	id: string;
+	id: number;
 	name: string;
 }
 
-type Order {
+type Order = {
 	id: string;
-	customer: string;
+	customer: number;
 	lineItems: string[];
 }
 
@@ -35,7 +35,7 @@ describe('Collection', () => {
 				id: string;
 				name: string;
 			}
-			const c = new Collection<"id", Model>();
+			const c = new Collection<Model>();
 			expect(c.pk).toEqual('id');
 		});
 
@@ -104,9 +104,9 @@ describe('Collection', () => {
 	});
 
 	describe.skip('can be joined', () => {
-		test('to another collection', () => {
-			const customerRepo = new Collection({name: 'customers'});
-			const orderRepo = new Collection({name: 'orders'});
+		test('to another collection', async () => {
+			const customerRepo = new Collection<Customer>();
+			const orderRepo = new Collection<Order>();
 
 			let customers = [
 				{id: 1, name: "Bob Jones"},
@@ -149,8 +149,6 @@ describe('Collection', () => {
 				{id: "ord-102", customer: {id: 2, name: "Rob Ross"}, lineItems: ["a","2","z"]},
 				{id: "ord-103", customer: {id: 2, name: "Rob Ross"}, lineItems: ["x","y","z"]}
 			]);
-
-			done();
 		});
 	});
 });

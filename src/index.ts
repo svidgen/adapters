@@ -1,39 +1,49 @@
 import { ulid } from 'ulid';
 
-type ModelWithPK<PK extends string> = {
-	[key in PK]: string
+type JoinOptions<FROM, TO> = {
+	from?: keyof FROM;
+	to?: keyof TO;
+	as?: string;
+	name? string;
 };
 
-type JoinOptions = {
-	from: string;
-	to: string;
-	as: string;
-};
-
-export function validateHasId<T>(item: T, pk: string) {
+export function validateHasId<T>(item: T, pk: keyof T) {
 	if (typeof (item as any)[pk] === 'undefined') {
 		throw new Error(`${item} does not have the expected PK: (${pk}).`);
 	}
 }
 
-export class Collection<
-	PK extends string = 'id',
-	T extends ModelWithPK<PK> = ModelWithPK<PK> & Record<string, any>
-> {
-	validate: (item: T, pk: PK) => any;
-	pk: PK;
+export class Collection<T = Record<string, JSON>> {
+	name: string;
+	validate: (item: T, pk: keyof T) => any;
+	pk: keyof T;
 
 	// TODO: replace with b-tree(s)
 	private items = new Map<string, T>();
 
 	constructor({
+		name = ulid(),
+		keygen = ulid,
 		validate = validateHasId,
-		pk = 'id' as PK,
+		pk = 'id',
 		items = []
-	}: (Partial<Collection<PK, T>> & { items?: T[] }) = {}) {
+		join,
+		from,
+		to,
+		as,
+		recurse
+	}: (Partial<Collection<T>> & { items?: T[] }) = {}) {
 		this.validate = validate;
 		this.pk = pk;
-		items.forEach(item => this.put(item));
+		this.put(items);
+		this.from = from;
+		this.to = to;
+		this.joinAs = as;
+		this.recurse = recurse || (items === join);
+		this.joinedTo = this.recurse ? this : join;
+		this.joinedAsParent = this.pk === this.from || !this.from;
+		this.joinedAsChild = this.pk !== this.from;
+		this.joinedToMany = this.joinedTo && (this.joinedTo.pk !== this.to);
 	}
 
 	[Symbol.asyncIterator]() {
@@ -57,27 +67,40 @@ export class Collection<
 		};
 	}
 
-	// index<Out>(f: (item: T) => Out, comparison?: (a: T, b: T) => number) {
-	// }
-
-	async get(pk: string) {
+	async get(pk: T[typeof this.pk]) {
 		return this.items.get(pk);
 	}
 
-	async put(item: Omit<T, PK> & Partial<ModelWithPK<PK>>): Promise<T> {
-		const itemCopy = {...item} as T;
+	async put(items: T | T[]): Promise<T[]> {
+		const saved: T[] = [];
 
-		const pk = itemCopy[this.pk];
-		if (!itemCopy[this.pk]) {
-			itemCopy[this.pk] = ulid() as T[PK];
+		for (const item of items) {
+			const itemCopy = {...item} as T;
+
+			const pk = itemCopy[this.pk];
+			if (!itemCopy[this.pk]) {
+				itemCopy[this.pk] = ulid() as typeof item[this.pk];
+			}
+
+			this.items.set(itemCopy[this.pk], itemCopy);
+			saved.push(itemCopy);
 		}
 
-		this.items.set(itemCopy[this.pk], itemCopy);
-
-		return itemCopy as T;
+		return saved;
 	}
 
-	join<TO extends AnyCollection>(to: Collection<TO>, options: JoinOptions<T, TO>) {
-
+	join<TO>(
+		to: Collection<TO>,
+		{from, to, as, name}: JoinOptions<T, TO>
+	) {
+		return new Collection<T & TO>({
+			pk: this.pk,
+			items: this,
+			name: name || `${this.name}_to_${table.name}`,
+			join: table,
+			as: as || 'join',
+			from: from || this.pk,
+			to: to || table.pk
+		});
 	}
 }
