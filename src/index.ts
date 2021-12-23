@@ -1,5 +1,16 @@
 import { ulid } from 'ulid';
 
+type AsyncIterator<T> = {
+	next(): {
+		value: T;
+		done: boolean;
+	}
+}
+
+type AsyncIterable<T> = {
+	[Symbol.asyncIterator]: () => AsyncIterator<T>;
+};
+
 type JoinOptions<FROM, TO> = {
 	from?: string;
 	to?: string;
@@ -17,8 +28,7 @@ type Storage<T> = {
 	get: (key: string) => Promise<T | undefined>;
 	set: (key: string, value: T) => Promise<boolean>;
 	find: (predicate: Partial<T>) => AsyncIterator<T>;
-	[Symbol.asyncIterator]: () => AsyncIterator<T>;
-}
+} & AsyncIterable<T>;
 
 export function validateHasId<T>(item: T, pk: string) {
 	if (typeof (item as any)[pk] === 'undefined') {
