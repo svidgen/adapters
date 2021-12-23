@@ -4,6 +4,12 @@ type ModelWithPK<PK extends string> = {
 	[key in PK]: string
 };
 
+type JoinOptions = {
+	from: string;
+	to: string;
+	as: string;
+};
+
 export function validateHasId<T>(item: T, pk: string) {
 	if (typeof (item as any)[pk] === 'undefined') {
 		throw new Error(`${item} does not have the expected PK: (${pk}).`);
@@ -71,4 +77,7 @@ export class Collection<
 		return itemCopy as T;
 	}
 
+	join<TO extends AnyCollection>(to: Collection<TO>, options: JoinOptions<T, TO>) {
+
+	}
 }

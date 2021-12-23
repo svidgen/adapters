@@ -7,6 +7,17 @@ function makeItems<PK extends string = 'id'>(ids: string[], idField: PK = 'id' a
 	})) as ({[key in PK]: any} & {name: string})[];
 };
 
+type Customer = {
+	id: string;
+	name: string;
+}
+
+type Order {
+	id: string;
+	customer: string;
+	lineItems: string[];
+}
+
 describe('Collection', () => {
 	describe("can be constructed with", () => {
 		test('no specific PK', () => {
@@ -90,6 +101,56 @@ describe('Collection', () => {
 				{id: 'c', name: 'c name'},
 			]);
 		});
+	});
 
+	describe.skip('can be joined', () => {
+		test('to another collection', () => {
+			const customerRepo = new Collection({name: 'customers'});
+			const orderRepo = new Collection({name: 'orders'});
+
+			let customers = [
+				{id: 1, name: "Bob Jones"},
+				{id: 2, name: "Rob Ross"},
+				{id: 3, name: "Jane Doe"}
+			];
+			await customerRepo.put(customers);
+
+			let orders = [
+				{id: 'ord-100', customer: 1, lineItems: ['a','b','c']},
+				{id: 'ord-101', customer: 1, lineItems: ['b','c','d']},
+				{id: 'ord-102', customer: 2, lineItems: ['a','2','z']},
+				{id: 'ord-103', customer: 2, lineItems: ['x','y','z']},
+				{id: 'ord-104', customer: 3, lineItems: ['b','o','p']},
+			];
+			await orderRepo.put(orders);
+
+			let customerWithOrders = customerRepo.join(orderRepo, {from: 'id', to: 'customer', as: 'orders', name: 'customersWithOrders'});
+			let ordersWithCustomer = orderRepo.join(customerRepo, {from: 'customer', to: 'id', as: 'customer', name: 'ordersWithCustomer'});
+
+			expect(await customerWithOrders.get(1)).toEqual({
+				id: 1, name:"Bob Jones", orders: [
+					{id: "ord-100", customer:1, lineItems: ["a","b","c"]},
+					{id: "ord-101", customer:1, lineItems: ["b","c","d"]}
+				]
+			});
+
+			expect(await ordersWithCustomer.get('ord-101')).toEqual({
+				id: 'ord-101', customer: {id: 1, name: 'Bob Jones'}, lineItems: ['b','c','d']
+			});
+
+			expect(await customerWithOrders.find({name: "Bob Jones"})).toEqual([
+				{id: 1, name:"Bob Jones", orders: [
+					{id: "ord-100", customer:1, lineItems: ["a","b","c"]},
+					{id: "ord-101", customer:1, lineItems: ["b","c","d"]}
+				]}
+			]);
+
+			expect(await ordersWithCustomer.find({customer: 2})).toEqual([
+				{id: "ord-102", customer: {id: 2, name: "Rob Ross"}, lineItems: ["a","2","z"]},
+				{id: "ord-103", customer: {id: 2, name: "Rob Ross"}, lineItems: ["x","y","z"]}
+			]);
+
+			done();
+		});
 	});
 });
