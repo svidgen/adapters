@@ -2,6 +2,7 @@
 	"transform": {
 	  "^.+\\.tsx?$": "ts-jest"
 	},
+	"roots": ["src", "test"],
 	"testRegex": "/test/.*",
 	"testEnvironment": "node",
 	"moduleFileExtensions": [
