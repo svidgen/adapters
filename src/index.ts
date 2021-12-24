@@ -1,21 +1,8 @@
 import { ulid } from 'ulid';
 
-/*
-type AsyncIterator<T> = {
-	next(): Promise<{
-		value?: T | undefined | null;
-		done?: boolean;
-	}>
-}
-
-type AsyncIterable<T> = {
-	[Symbol.asyncIterator]: () => AsyncIterator<T>;
-};
- */
-
 type JoinOptions<FROM, TO> = {
-	from?: string;
-	to?: string;
+	from?: keyof FROM;
+	to?: keyof TO;
 	as?: string;
 	name?: string;
 };
@@ -26,18 +13,12 @@ type CollectionOptions<T extends Record<string, any>, JoinType = never> = Partia
 	join?: JoinType extends Record<string, any> ? Collection<JoinType> : undefined;
 };
 
-/*
-type Storage<PK_TYPE, T> = {
-	get: (key: PK_TYPE) => Promise<T | undefined>;
-	set: (key: PK_TYPE, value: T) => Promise<boolean>;
-	find: (predicate: Partial<T>) => AsyncIterator<T> | AsyncGenerator<T>;
-} & AsyncIterable<T>;
- */
-
-interface Storage<PK_TYPE, T> extends AsyncIterable<T> {
-	get: (key: PK_TYPE) => Promise<T | undefined>;
-	set: (key: PK_TYPE, value: T) => Promise<boolean>;
-	find: (predicate: Partial<T>) => AsyncIterator<T>;
+interface Storage<PK_TYPE, T> {
+	get(key: PK_TYPE): Promise<T | undefined>;
+	set(key: PK_TYPE, value: T): Promise<boolean>;
+	put(items: T | T[]): Promise<T[]>;
+	find(predicate: Partial<T>): AsyncGenerator<T>;
+	[Symbol.asyncIterator](): AsyncIterator<T | undefined>;
 }
 
 export function validateHasId<T>(item: T, pk: string) {
@@ -46,7 +27,7 @@ export function validateHasId<T>(item: T, pk: string) {
 	}
 }
 
-export class MapAdapter<PK_TYPE, T> {
+export class MapAdapter<PK_TYPE, T> implements Storage<PK_TYPE, T> {
 	items = new Map<PK_TYPE, T>();
 
 	async set(key: PK_TYPE, value: T) {
@@ -54,6 +35,12 @@ export class MapAdapter<PK_TYPE, T> {
 			return true;
 		} else {
 			return false;
+		}
+	}
+
+	async put(items: T | T[]) {
+		if (!(items instanceof Array)) {
+			return this.put([items]);
 		}
 	}
 
@@ -75,25 +62,11 @@ export class MapAdapter<PK_TYPE, T> {
 
 	// can we use a generator here?
 	// https://tinyurl.com/async-iterator-with-generator
-	async* [Symbol.asyncIterator]() {
+	async * [Symbol.asyncIterator]() {
 		const keys = Array.from(this.items.keys()).sort();
-		let i = 0;
-		return {
-			next: async () => {
-				if (i < keys.length) {
-					const result = {
-						value: await this.get(keys[i]),
-						done: false,
-					};
-					i++;
-					return result;
-				}
-				return {
-					done: true,
-					value: null 
-				};
-			},
-		};
+		for (const key of keys) {
+			yield this.items.get(key);
+		}
 	}
 }
 
@@ -120,7 +93,7 @@ export class Collection<T extends Record<string, any> = Record<string, any>> {
 		keygen = ulid,
 		validate = validateHasId,
 		pk = 'id',
-		items = []
+		items = [],
 		join,
 		from,
 		to,
@@ -144,38 +117,25 @@ export class Collection<T extends Record<string, any> = Record<string, any>> {
 
 	// can we use a generator here?
 	// https://tinyurl.com/async-iterator-with-generator
-	[Symbol.asyncIterator]() {
-		const iterator = this.items[Symbol.asyncIterator]();
-		return {
-			next: async () => {
-				const v = await iterator.next();
-				if (v) {
-					return {
-						value: this.ajoin({...v}),
-						done: false,
-					};
-				} else {
-					return {
-						value: null,
-						done: true,
-					}
-				}
-			}
-		};
+	async * [Symbol.asyncIterator]() {
+		for await (const item of this.items) {
+			yield item ? this.ajoin({...item}) : undefined;
+		}
 	}
 
-	async get(key: T[typeof this.pk]) {
+	async get(key: T[T['pk']]) {
 		return this.ajoin({...(await this.items.get(key))} as T);
 	}
 
-	async set(key: T[typeof this.pk], value: T) {
+	async set(key: T[T['pk']], value: T) {
 		return this.items.set(key, value);
 	}
 
 	async put(items: T | T[]): Promise<T[]> {
+		return this.items.put(items);
 	}
 
-	async find(predicate: Partial<T>) {
+	async * find(predicate: Partial<T>) {
 		// eventually, we want this to filter in 3 passes:
 		// 1. server-fiterable predicates
 		// 2. client-side, left-hand filterable predicates
@@ -185,24 +145,14 @@ export class Collection<T extends Record<string, any> = Record<string, any>> {
 		// paging behind the scenes to prevent unnecessary scans
 		// and transfer for remote data sources, like dynamo or s3
 
-		let basis;
-		if (typeof this.items.find === 'function') {
-			basis = await this.items.find(predicate);
-		} else {
-			let p = predicate || {};
-			basis = Object.values(this.items).filter(item =>
-				Object.entries(p).every(([k,v]) => item[k] === v)
-			);
+		for await (const item of this.items.find(predicate)) {
+			yield item ? this.ajoin({...item}) : undefined;
 		}
-		
-		// TODO: return async iterable
-		return Promise.all(basis.map(o => this.ajoin({...o})));
 	};
 
-	private async ajoin(item: T | undefined) {
-		if (!item) return;
+	private async ajoin(item: T) {
 		if (this.joinedTo && this.to && item[this.from!]) {
-			const joinedItems = await this.joinedTo.find({[this.to!]: item[this.from!]});
+			const joinedItems = this.joinedTo.find({[this.to!]: item[this.from!]});
 			if (this.joinedToMany) {
 				(item as any)[this.joinAs!] = joinedItems;
 			} else {
