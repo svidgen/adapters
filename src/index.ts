@@ -1,15 +1,17 @@
 import { ulid } from 'ulid';
 
+/*
 type AsyncIterator<T> = {
-	next(): {
-		value: T;
-		done: boolean;
-	}
+	next(): Promise<{
+		value?: T | undefined | null;
+		done?: boolean;
+	}>
 }
 
 type AsyncIterable<T> = {
 	[Symbol.asyncIterator]: () => AsyncIterator<T>;
 };
+ */
 
 type JoinOptions<FROM, TO> = {
 	from?: string;
@@ -24,11 +26,19 @@ type CollectionOptions<T extends Record<string, any>, JoinType = never> = Partia
 	join?: JoinType extends Record<string, any> ? Collection<JoinType> : undefined;
 };
 
-type Storage<T> = {
-	get: (key: string) => Promise<T | undefined>;
-	set: (key: string, value: T) => Promise<boolean>;
-	find: (predicate: Partial<T>) => AsyncIterator<T>;
+/*
+type Storage<PK_TYPE, T> = {
+	get: (key: PK_TYPE) => Promise<T | undefined>;
+	set: (key: PK_TYPE, value: T) => Promise<boolean>;
+	find: (predicate: Partial<T>) => AsyncIterator<T> | AsyncGenerator<T>;
 } & AsyncIterable<T>;
+ */
+
+interface Storage<PK_TYPE, T> extends AsyncIterable<T> {
+	get: (key: PK_TYPE) => Promise<T | undefined>;
+	set: (key: PK_TYPE, value: T) => Promise<boolean>;
+	find: (predicate: Partial<T>) => AsyncIterator<T>;
+}
 
 export function validateHasId<T>(item: T, pk: string) {
 	if (typeof (item as any)[pk] === 'undefined') {
@@ -36,10 +46,10 @@ export function validateHasId<T>(item: T, pk: string) {
 	}
 }
 
-export class MapAdapter<T> {
-	items = new Map<string, T>();
+export class MapAdapter<PK_TYPE, T> {
+	items = new Map<PK_TYPE, T>();
 
-	async set(key: string, value: T) {
+	async set(key: PK_TYPE, value: T) {
 		if(this.items.set(key, value)) {
 			return true;
 		} else {
@@ -47,7 +57,7 @@ export class MapAdapter<T> {
 		}
 	}
 
-	async get(key: string) {
+	async get(key: PK_TYPE) {
 		return this.items.get(key);
 	}
 
@@ -91,7 +101,7 @@ export class Collection<T extends Record<string, any> = Record<string, any>> {
 	name: string;
 	keygen: () => string;
 	validate: (item: T, pk: string) => any;
-	pk: string;
+	pk: keyof T;
 
 	joinedTo?: Collection;
 	from?: string;
@@ -102,8 +112,8 @@ export class Collection<T extends Record<string, any> = Record<string, any>> {
 	joinedAsParent?: boolean;
 	joinedToMany?: boolean;
 
-	// TODO: replace with b-tree(s)
-	private items: Storage<T> = new MapAdapter<T>();
+	// TODO: replace with b-tree(s)?
+	private items: Storage<T[typeof this.pk], T> = new MapAdapter<T[typeof this.pk], T>();
 
 	constructor({
 		name = ulid(),
@@ -154,11 +164,11 @@ export class Collection<T extends Record<string, any> = Record<string, any>> {
 		};
 	}
 
-	async get(key: string) {
+	async get(key: T[typeof this.pk]) {
 		return this.ajoin({...(await this.items.get(key))} as T);
 	}
 
-	async set(key: string, value: T) {
+	async set(key: T[typeof this.pk], value: T) {
 		return this.items.set(key, value);
 	}
 
