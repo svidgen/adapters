@@ -1,5 +1,8 @@
 import { ulid } from 'ulid';
 
+// reference:
+// https://www.typescriptlang.org/play?target=99&noStrictGenericChecks=true#code/C4TwDgpgBA6glsAFgeTMOB7AdgQwDYBicEeAJgM4A8AKlBAB7ARYVQBKEAxhgE6mXlgPOFgDmAGig4sIAHySiJVgyYtyUANYQQGAGZRqsqAF4oyALYIaC4mXJGAZFAAKOHunyVncThutRFO1lZAG4AWAAoUEgoAGVEHEhkXRojUwsrakksCAA3CB5QyMjOPBxydWQoAG9IgEhuLEEeAFdOYF4ACnq6sBaAIzwfKDhSAC4oLBbzfoLxHr7B4dxzCAnmkQl6gEoagF9IvfCIyOjoWlMAYWxmto6eVx4cVaYeKjO9MyKTiN0WrHamCwUHMOC0AH1Rp1drUInUeBBgC0eMDOjkAO5QAAiOCY0IAdKJEdQ4KtobsANRQACyuMQ+N0eAwXVpSHxTxYGHM0KgACooABGAAMIu2xwOP1K5XUWNilHqtBUzFYHG4fAEQk2kmkchM7C4vH4GzE2pksnqkmcAGlwdQAJrOACidEYyvUWh0+guUAA5KMfZEjLD4RAcKRsHgQFAwBoJtbbQ7HccQ2GI1GEBBzOpTNU9lJ1KrDTQANrx+1OgC6kniiQgyVS33qjVu7S6wbq5gwpBI8zhvQ0er9pB9+ZcNvLjvqewm7c73bwAH4JrQAD5QNEQTGdfE7tyicgTHW7YxGajbXt1ftLscJp1TvW5mE9JBwcj4mN6mPJiX1InAToxsupbjomFbbBMNZJCkhhQGu-zdroIgQKQNQ9AiSIolAL5vhmWbFjGFbfsUcJ9P+uETPASCoOg2D4IEFD+GWiayE+fbNsAIxMOYlGINaD7Fth74aBWEyghCULnlAO74rheblAYyZ1IJuHkMWuE8daAmIK+QkVhWerqQgvFWkREQ-hEAD0FlQM2GB4BA+JMqInTIPiHSxJqYjkscJQ3Bxejgsg4L9CAkIoaYGLYrEnTVHOJATMgexipEAVBSFYWEoinQCgATAAzMlESpcFoWjO+LT-tUowTAALAArHV2TPGsUAAETogkTD5DwrVJccxXpWVpExSsLXtZ1eQFL1hW+U0-m6IFJXgqNeqRbKMVxXgCWSIBbWjdN-ULWloWjZl-6tTg-ScK1M0ROxUABbEAASACCTpLaMq2blFG1dvFNQ4BMrWtZI-QTEKkjVVAQp7ElxFWVh4DnHqHz6BQxY+jGPqEZECNnAYOV6sgAlI586OYxo2M45Z1n40x72xNQL3UAAkpcRPFq1oytYRQA
+
 type JoinOptions<FROM, TO> = {
 	from?: keyof FROM;
 	to?: keyof TO;
@@ -7,16 +10,23 @@ type JoinOptions<FROM, TO> = {
 	name?: string;
 };
 
-type CollectionOptions<T extends Record<string, any>, JoinType = never> = Partial<Collection<T>> & {
+type ShapeOf<T> = Pick<T, keyof T>;
+type KeyTypes = number | string;
+type KeyValuePair<K extends KeyTypes, V> = [K, V];
+type SuccessResponse<K extends KeyTypes> = KeyValuePair<K, boolean>;
+
+type WithOptionalFields<T extends Record<string, any>, Fields extends keyof T> = Omit<T, Fields> & Partial<Pick<T, Fields>>;
+
+export type CollectionOptions<T extends Record<string, any>, JoinType = never> = Partial<Collection<T>> & {
 	items?: T[];
 	as?: string;
 	join?: JoinType extends Record<string, any> ? Collection<JoinType> : undefined;
 };
 
-interface Storage<PK_TYPE, T> {
+interface Storage<PK_TYPE extends string | number, T> {
 	get(key: PK_TYPE): Promise<T | undefined>;
 	set(key: PK_TYPE, value: T): Promise<boolean>;
-	put(items: T | T[]): Promise<T[]>;
+	set(items: KeyValuePair<PK_TYPE, T>[]): Promise<SuccessResponse<PK_TYPE>[]>;
 	find(predicate: Partial<T>): AsyncGenerator<T>;
 	[Symbol.asyncIterator](): AsyncIterator<T | undefined>;
 }
@@ -27,20 +37,35 @@ export function validateHasId<T>(item: T, pk: string) {
 	}
 }
 
-export class MapAdapter<PK_TYPE, T> implements Storage<PK_TYPE, T> {
+export class SaveError<T> extends Error {
+	constructor(
+		public readonly saved: T[],
+		public readonly failed: T[],
+		public readonly reason?: any
+	) {
+		super("Error saving items!" + (reason ? ` (${reason})` : ''));
+	}
+}
+
+export class MapAdapter<PK_TYPE extends KeyTypes, T> implements Storage<PK_TYPE, T> {
 	items = new Map<PK_TYPE, T>();
 
-	async set(key: PK_TYPE, value: T) {
-		if(this.items.set(key, value)) {
-			return true;
+	async set(key: PK_TYPE, value: T): Promise<boolean>;
+	async set(items: KeyValuePair<PK_TYPE, T>[]): Promise<SuccessResponse<PK_TYPE>[]>;
+	async set(itemsOrKey: KeyValuePair<PK_TYPE, T>[] | PK_TYPE, value?: T) {
+		if (itemsOrKey instanceof Array) {
+			const set_promises = itemsOrKey.map(async ([key, value]) => [
+				key, await this.set(key, value)
+			] as SuccessResponse<PK_TYPE>);
+			return Promise.all(set_promises);
+		} else if (value) {
+			if(this.items.set(itemsOrKey, value)) {
+				return true;
+			} else {
+				return false;
+			}
 		} else {
 			return false;
-		}
-	}
-
-	async put(items: T | T[]) {
-		if (!(items instanceof Array)) {
-			return this.put([items]);
 		}
 	}
 
@@ -48,7 +73,7 @@ export class MapAdapter<PK_TYPE, T> implements Storage<PK_TYPE, T> {
 		return this.items.get(key);
 	}
 
-	async* find(predicate: Partial<T>) {
+	async * find(predicate: Partial<T>) {
 		const p = predicate || {} as Partial<T>;
 		const items = Array.from(this.items.values()).filter(item =>
 			Object.entries(p).every(([k,v]) => (item as any)[k] === v)
@@ -56,7 +81,7 @@ export class MapAdapter<PK_TYPE, T> implements Storage<PK_TYPE, T> {
 		yield* items;
 	}
 
-	async* keys() {
+	async * keys() {
 		yield* Array.from(this.items.keys()).sort();
 	}
 
@@ -70,15 +95,19 @@ export class MapAdapter<PK_TYPE, T> implements Storage<PK_TYPE, T> {
 	}
 }
 
-export class Collection<T extends Record<string, any> = Record<string, any>> {
-	name: string;
-	keygen: () => string;
-	validate: (item: T, pk: string) => any;
-	pk: keyof T;
+export class Collection<
+	T extends Record<string, any> = Record<string, any>,
+	PK extends keyof T = 'id',
+	JoinType = never
+> {
+	readonly name: string;
+	readonly pk: PK;
+
+	keygen: () => T[PK];
 
 	joinedTo?: Collection;
-	from?: string;
-	to?: string;
+	from?: keyof T;
+	to?: keyof JoinType;
 	joinAs?: string;
 	recurse: boolean = true;
 	joinedAsChild?: boolean;
@@ -89,20 +118,30 @@ export class Collection<T extends Record<string, any> = Record<string, any>> {
 	private items: Storage<T[typeof this.pk], T> = new MapAdapter<T[typeof this.pk], T>();
 
 	constructor({
-		name = ulid(),
-		keygen = ulid,
-		validate = validateHasId,
-		pk = 'id',
+		name = `unknown_${ulid()}`,
+		model,
+		keygen = ulid as T[PK],
+		pk = 'id' as PK,
 		items = [],
 		join,
 		from,
 		to,
 		as,
 		recurse
-	}: CollectionOptions<T> = {}) {
+	}: {
+		name?: string;
+		model?: T | (new (...args: any) => T);
+		keygen?: () => T[PK];
+		pk?: PK;
+		items?: T[];
+		join?: JoinType extends Record<string, any> ? Collection<JoinType> : undefined;
+		from?: keyof T;
+		to?: keyof JoinType;
+		as?: string;
+		recurse?: boolean;
+	} = {}) {
 		this.name = name;
 		this.keygen = keygen;
-		this.validate = validate;
 		this.pk = pk;
 		this.put(items);
 		this.from = from;
@@ -115,6 +154,13 @@ export class Collection<T extends Record<string, any> = Record<string, any>> {
 		this.joinedToMany = this.joinedTo && (this.joinedTo.pk !== this.to);
 	}
 
+	private withId(item: WithOptionalFields<T, PK>): ShapeOf<T> {
+		if (!item[this.pk]) {
+			item[this.pk] = this.keygen();
+		}
+		return item as T;
+	}
+
 	// can we use a generator here?
 	// https://tinyurl.com/async-iterator-with-generator
 	async * [Symbol.asyncIterator]() {
@@ -123,16 +169,46 @@ export class Collection<T extends Record<string, any> = Record<string, any>> {
 		}
 	}
 
-	async get(key: T[T['pk']]) {
-		return this.ajoin({...(await this.items.get(key))} as T);
+	async get(key: T[PK]): Promise<ShapeOf<T>> {
+		return this.ajoin({...(await this.items.get(key))} as ShapeOf<T>);
 	}
 
-	async set(key: T[T['pk']], value: T) {
+	async set(key: T[PK], value: T) {
 		return this.items.set(key, value);
 	}
 
-	async put(items: T | T[]): Promise<T[]> {
-		return this.items.put(items);
+	async put(item: WithOptionalFields<T, PK>, failEarly?: true): Promise<ShapeOf<T>>;
+	async put(items: WithOptionalFields<T, PK>[], failEarly?: true): Promise<ShapeOf<T>[]>;
+	async put(itemOrItems: WithOptionalFields<T, PK>[] | WithOptionalFields<T, PK>, failEarly?: true): Promise<ShapeOf<T> | ShapeOf<T>[]> {
+		if (itemOrItems instanceof Array) {
+			const saved: ShapeOf<T>[] = [];
+			const failed: ShapeOf<T>[] = [];
+
+			let error: any = null;
+
+			for (const _item of itemOrItems) {
+				const item = this.withId(_item);
+				try {
+					await this.set(item[this.pk], item);
+					saved.push(item);
+				} catch (e) {
+					failed.push(item);
+					if (failEarly) {
+						throw new SaveError(saved, failed, e);
+					} else {
+						error = e;
+					}
+				}
+			};
+
+			if (error) {
+				throw new SaveError(saved, failed, error);
+			}
+
+			return saved;
+		} else {
+			return (await this.put([itemOrItems])).pop()!;
+		}
 	}
 
 	async * find(predicate: Partial<T>) {
@@ -150,7 +226,7 @@ export class Collection<T extends Record<string, any> = Record<string, any>> {
 		}
 	};
 
-	private async ajoin(item: T) {
+	private async ajoin(item: ShapeOf<T>) {
 		if (this.joinedTo && this.to && item[this.from!]) {
 			const joinedItems = this.joinedTo.find({[this.to!]: item[this.from!]});
 			if (this.joinedToMany) {
