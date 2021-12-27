@@ -3,19 +3,25 @@ import { ulid } from 'ulid';
 // reference:
 // https://www.typescriptlang.org/play?target=99&noStrictGenericChecks=true#code/C4TwDgpgBA6glsAFgeTMOB7AdgQwDYBicEeAJgM4A8AKlBAB7ARYVQBKEAxhgE6mXlgPOFgDmAGig4sIAHySiJVgyYtyUANYQQGAGZRqsqAF4oyALYIaC4mXJGAZFAAKOHunyVncThutRFO1lZAG4AWAAoUEgoAGVEHEhkXRojUwsrakksCAA3CB5QyMjOPBxydWQoAG9IgEhuLEEeAFdOYF4ACnq6sBaAIzwfKDhSAC4oLBbzfoLxHr7B4dxzCAnmkQl6gEoagF9IvfCIyOjoWlMAYWxmto6eVx4cVaYeKjO9MyKTiN0WrHamCwUHMOC0AH1Rp1drUInUeBBgC0eMDOjkAO5QAAiOCY0IAdKJEdQ4KtobsANRQACyuMQ+N0eAwXVpSHxTxYGHM0KgACooABGAAMIu2xwOP1K5XUWNilHqtBUzFYHG4fAEQk2kmkchM7C4vH4GzE2pksnqkmcAGlwdQAJrOACidEYyvUWh0+guUAA5KMfZEjLD4RAcKRsHgQFAwBoJtbbQ7HccQ2GI1GEBBzOpTNU9lJ1KrDTQANrx+1OgC6kniiQgyVS33qjVu7S6wbq5gwpBI8zhvQ0er9pB9+ZcNvLjvqewm7c73bwAH4JrQAD5QNEQTGdfE7tyicgTHW7YxGajbXt1ftLscJp1TvW5mE9JBwcj4mN6mPJiX1InAToxsupbjomFbbBMNZJCkhhQGu-zdroIgQKQNQ9AiSIolAL5vhmWbFjGFbfsUcJ9P+uETPASCoOg2D4IEFD+GWiayE+fbNsAIxMOYlGINaD7Fth74aBWEyghCULnlAO74rheblAYyZ1IJuHkMWuE8daAmIK+QkVhWerqQgvFWkREQ-hEAD0FlQM2GB4BA+JMqInTIPiHSxJqYjkscJQ3Bxejgsg4L9CAkIoaYGLYrEnTVHOJATMgexipEAVBSFYWEoinQCgATAAzMlESpcFoWjO+LT-tUowTAALAArHV2TPGsUAAETogkTD5DwrVJccxXpWVpExSsLXtZ1eQFL1hW+U0-m6IFJXgqNeqRbKMVxXgCWSIBbWjdN-ULWloWjZl-6tTg-ScK1M0ROxUABbEAASACCTpLaMq2blFG1dvFNQ4BMrWtZI-QTEKkjVVAQp7ElxFWVh4DnHqHz6BQxY+jGPqEZECNnAYOV6sgAlI586OYxo2M45Z1n40x72xNQL3UAAkpcRPFq1oytYRQA
 
-type JoinOptions<FROM, TO> = {
-	from?: keyof FROM;
-	to?: keyof TO;
-	as?: string;
-	name?: string;
-};
-
 type ShapeOf<T> = Pick<T, keyof T>;
 type KeyTypes = number | string;
 type KeyValuePair<K extends KeyTypes, V> = [K, V];
 type SuccessResponse<K extends KeyTypes> = KeyValuePair<K, boolean>;
 
 type WithOptionalFields<T extends Record<string, any>, Fields extends keyof T> = Omit<T, Fields> & Partial<Pick<T, Fields>>;
+
+type WithFieldsRemapped<T, KEYS extends string, TO_TYPE> = {
+	[K in keyof T]: K extends KEYS ? TO_TYPE | string : T[K];
+} & {
+	[K in Exclude<KEYS, keyof T>]: TO_TYPE | string;
+};
+
+type JoinOptions<FROM, TO, FK extends keyof FROM, TO_ID extends keyof TO, AS extends string> = {
+	from?: FK;
+	to?: TO_ID;
+	as?: AS;
+	name?: string;
+};
 
 export type CollectionOptions<T extends Record<string, any>, JoinType = never> = Partial<Collection<T>> & {
 	items?: T[];
@@ -98,31 +104,31 @@ export class MapAdapter<PK_TYPE extends KeyTypes, T> implements Storage<PK_TYPE,
 export class Collection<
 	T extends Record<string, any> = Record<string, any>,
 	PK extends keyof T = 'id',
-	JoinType = never
-> {
+	JoinType extends Record<string, any> = never,
+	JoinPK extends keyof JoinType = never
+> implements Storage<T[PK], T> {
 	readonly name: string;
 	readonly pk: PK;
 
 	keygen: () => T[PK];
 
-	joinedTo?: Collection;
+	joinedTo?: Collection<JoinType, JoinPK>;
 	from?: keyof T;
 	to?: keyof JoinType;
-	joinAs?: string;
+	joinAs?: keyof T;
 	recurse: boolean = true;
 	joinedAsChild?: boolean;
 	joinedAsParent?: boolean;
 	joinedToMany?: boolean;
 
-	// TODO: replace with b-tree(s)?
-	private items: Storage<T[typeof this.pk], T> = new MapAdapter<T[typeof this.pk], T>();
+	private items: Storage<T[PK], T>;
 
 	constructor({
 		name = `unknown_${ulid()}`,
 		model,
 		keygen = ulid as T[PK],
 		pk = 'id' as PK,
-		items = [],
+		items = new MapAdapter<T[PK], T>(), // TODO: replace default with b-tree?
 		join,
 		from,
 		to,
@@ -133,17 +139,17 @@ export class Collection<
 		model?: T | (new (...args: any) => T);
 		keygen?: () => T[PK];
 		pk?: PK;
-		items?: T[];
-		join?: JoinType extends Record<string, any> ? Collection<JoinType> : undefined;
+		items?: Storage<T[PK], T>;
+		join?: Collection<JoinType, JoinPK>;
 		from?: keyof T;
 		to?: keyof JoinType;
-		as?: string;
+		as?: keyof T;
 		recurse?: boolean;
 	} = {}) {
 		this.name = name;
 		this.keygen = keygen;
 		this.pk = pk;
-		this.put(items);
+		this.items = items;
 		this.from = from;
 		this.to = to;
 		this.joinAs = as;
@@ -173,8 +179,14 @@ export class Collection<
 		return this.ajoin({...(await this.items.get(key))} as ShapeOf<T>);
 	}
 
-	async set(key: T[PK], value: T) {
-		return this.items.set(key, value);
+	async set(key: T[PK], value: T): Promise<boolean>;
+	async set(items: KeyValuePair<T[PK], T>[]): Promise<SuccessResponse<T[PK]>[]>;
+	async set(itemsOrKey: KeyValuePair<T[PK], T>[] | T[PK], value?: T) {
+		if (value) {
+			return this.items.set(itemsOrKey as T[PK], value);
+		} else {
+			return this.items.set(itemsOrKey);
+		}
 	}
 
 	async put(item: WithOptionalFields<T, PK>, failEarly?: true): Promise<ShapeOf<T>>;
@@ -222,34 +234,46 @@ export class Collection<
 		// and transfer for remote data sources, like dynamo or s3
 
 		for await (const item of this.items.find(predicate)) {
-			yield item ? this.ajoin({...item}) : undefined;
+			yield this.ajoin({...item});
 		}
 	};
 
 	private async ajoin(item: ShapeOf<T>) {
-		if (this.joinedTo && this.to && item[this.from!]) {
-			const joinedItems = this.joinedTo.find({[this.to!]: item[this.from!]});
-			if (this.joinedToMany) {
-				(item as any)[this.joinAs!] = joinedItems;
-			} else {
-				(item as any)[this.joinAs!] = joinedItems.pop();
+		if (this.joinedTo && this.to && this.from && this.joinAs && item[this.from]) {
+			const query = {[this.to]: item[this.from]} as Partial<JoinType>;
+			const joinedItems = [];
+			for await (const joinedItem of this.joinedTo.find(query)) {
+				joinedItems.push(joinedItem);
+				if (this.joinedToMany) {
+					(item as any)[this.joinAs] = joinedItems;
+				} else {
+					(item as any)[this.joinAs] = joinedItems.pop();
+				}
 			}
 		}
 		return item;
 	};
 
-	join<TO>(
-		table: Collection<TO>,
-		{from, to, as, name}: JoinOptions<T, TO>
+	public join<
+		TO_TYPE,
+		TO_PK extends keyof TO_TYPE,
+		FK extends keyof T,
+		TO_ID extends keyof TO_TYPE,
+		AS extends string
+	>(
+		table: Collection<TO_TYPE, TO_PK>,
+		{
+			from,
+			to,
+			as,
+			name = `${this.name}_to_${table.name}`
+		}: JoinOptions<T, TO_TYPE, FK, TO_ID, AS>
 	) {
-		return new Collection<T & TO>({
+		return new Collection<WithFieldsRemapped<T, AS, TO_TYPE>, PK, TO_TYPE, TO_PK>({
 			pk: this.pk,
 			items: this,
-			name: name || `${this.name}_to_${table.name}`,
 			join: table,
-			as: as || 'join',
-			from: from || this.pk,
-			to: to || table.pk
+			name, as, from, to
 		});
 	}
 }
