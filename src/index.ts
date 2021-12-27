@@ -11,9 +11,9 @@ type SuccessResponse<K extends KeyTypes> = KeyValuePair<K, boolean>;
 type WithOptionalFields<T extends Record<string, any>, Fields extends keyof T> = Omit<T, Fields> & Partial<Pick<T, Fields>>;
 
 type WithFieldsRemapped<T, KEYS extends string, TO_TYPE> = {
-	[K in keyof T]: K extends KEYS ? TO_TYPE | string : T[K];
+	[K in keyof T]: K extends KEYS ? TO_TYPE : T[K];
 } & {
-	[K in Exclude<KEYS, keyof T>]: TO_TYPE | string;
+	[K in Exclude<KEYS, keyof T>]: TO_TYPE;
 };
 
 type JoinOptions<FROM, TO, FK extends keyof FROM, TO_ID extends keyof TO, AS extends string> = {
@@ -128,7 +128,7 @@ export class Collection<
 		model,
 		keygen = ulid as T[PK],
 		pk = 'id' as PK,
-		items = new MapAdapter<T[PK], T>(), // TODO: replace default with b-tree?
+		items = new MapAdapter<T[PK], T>(),
 		join,
 		from,
 		to,
@@ -269,7 +269,7 @@ export class Collection<
 			name = `${this.name}_to_${table.name}`
 		}: JoinOptions<T, TO_TYPE, FK, TO_ID, AS>
 	) {
-		return new Collection<WithFieldsRemapped<T, AS, TO_TYPE>, PK, TO_TYPE, TO_PK>({
+		return new Collection<WithFieldsRemapped<T, AS, TO_TYPE | TO_TYPE[TO_PK]>, PK, TO_TYPE, TO_PK>({
 			pk: this.pk,
 			items: this,
 			join: table,
