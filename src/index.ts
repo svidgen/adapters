@@ -23,6 +23,10 @@ type JoinOptions<FROM, TO, FK extends keyof FROM, TO_ID extends keyof TO, AS ext
 	name?: string;
 };
 
+type RecursivePartial<T> = {
+	[K in keyof T]+?: T[K] extends Object ? RecursivePartial<T[K]> : T[K];
+};
+
 export type CollectionOptions<T extends Record<string, any>, JoinType = never> = Partial<Collection<T>> & {
 	items?: T[];
 	as?: string;
@@ -33,7 +37,8 @@ interface Storage<PK_TYPE extends string | number, T> {
 	get(key: PK_TYPE): Promise<T | undefined>;
 	set(key: PK_TYPE, value: T): Promise<boolean>;
 	set(items: KeyValuePair<PK_TYPE, T>[]): Promise<SuccessResponse<PK_TYPE>[]>;
-	find(predicate: Partial<T>): AsyncGenerator<T>;
+	find(predicate: RecursivePartial<T>): AsyncGenerator<T>;
+	// where(predicate: Partial<T>): Storage<PK_TYPE, T>;
 	[Symbol.asyncIterator](): AsyncIterator<T | undefined>;
 }
 
@@ -79,10 +84,9 @@ export class MapAdapter<PK_TYPE extends KeyTypes, T> implements Storage<PK_TYPE,
 		return this.items.get(key);
 	}
 
-	async * find(predicate: Partial<T>) {
-		const p = predicate || {} as Partial<T>;
+	async * find(predicate: RecursivePartial<T> = {}) {
 		const items = Array.from(this.items.values()).filter(item =>
-			Object.entries(p).every(([k,v]) => (item as any)[k] === v)
+			Object.entries(predicate).every(([k,v]) => (item as any)[k] === v)
 		);
 		yield* items;
 	}
@@ -171,12 +175,21 @@ export class Collection<
 	// https://tinyurl.com/async-iterator-with-generator
 	async * [Symbol.asyncIterator]() {
 		for await (const item of this.items) {
-			yield item ? this.ajoin({...item}) : undefined;
+			yield item ? this.bless({...item}) : undefined;
 		}
 	}
 
+	async toArray({max = Number.MAX_SAFE_INTEGER}: {max?: number} = {}) {
+		const items = [];
+		for await (const item of this) {
+			if (items.length >= max) break;
+			items.push(item);
+		}
+		return items;
+	}
+
 	async get(key: T[PK]): Promise<ShapeOf<T>> {
-		return this.ajoin({...(await this.items.get(key))} as ShapeOf<T>);
+		return this.bless({...(await this.items.get(key))} as ShapeOf<T>);
 	}
 
 	async set(key: T[PK], value: T): Promise<boolean>;
@@ -223,7 +236,7 @@ export class Collection<
 		}
 	}
 
-	async * find(predicate: Partial<T>) {
+	async * find(predicate: RecursivePartial<T>) {
 		// eventually, we want this to filter in 3 passes:
 		// 1. server-fiterable predicates
 		// 2. client-side, left-hand filterable predicates
@@ -233,14 +246,43 @@ export class Collection<
 		// paging behind the scenes to prevent unnecessary scans
 		// and transfer for remote data sources, like dynamo or s3
 
-		for await (const item of this.items.find(predicate)) {
-			yield this.ajoin({...item});
+		// TODO:
+		// cost() functions.
+		// compare costs and query by lowest cost first.
+
+		// const join_predicate = this.joinAs ? predicate[this.joinAs] as RecursivePartial<JoinType> : undefined;
+
+		const self_predicate = {...predicate} as Partial<T>;
+		if (this.joinAs) {
+			delete self_predicate[this.joinAs];
+		}
+
+		for await (const item of this.items.find(self_predicate)) {
+			const blessed_item = await this.bless({...item});
+			if (await this.matches(blessed_item, predicate)) {
+				yield blessed_item;
+			}
 		}
 	};
 
-	private async ajoin(item: ShapeOf<T>) {
+	private async matches(item: any, predicate: any): Promise<boolean> {
+		for (const [k, v] of Object.entries(predicate)) {
+			if (typeof v === 'object' && v !== null) {
+				if (!await this.matches(await item[k], v)) {
+					return false;
+				}
+			} else {
+				if ((await item[k]) != v) {
+					return false;
+				}
+			}
+		}
+		return true;
+	}
+
+	private async bless(item: ShapeOf<T>) {
 		if (this.joinedTo && this.to && this.from && this.joinAs && item[this.from]) {
-			const query = {[this.to]: item[this.from]} as Partial<JoinType>;
+			const query = { [this.to]: item[this.from] } as Partial<JoinType>;
 			const joinedItems = [];
 			for await (const joinedItem of this.joinedTo.find(query)) {
 				joinedItems.push(joinedItem);
@@ -269,7 +311,8 @@ export class Collection<
 			name = `${this.name}_to_${table.name}`
 		}: JoinOptions<T, TO_TYPE, FK, TO_ID, AS>
 	) {
-		return new Collection<WithFieldsRemapped<T, AS, TO_TYPE | TO_TYPE[TO_PK]>, PK, TO_TYPE, TO_PK>({
+		// return new Collection<WithFieldsRemapped<T, AS, TO_TYPE | TO_TYPE[TO_PK]>, PK, TO_TYPE, TO_PK>({
+		return new Collection<WithFieldsRemapped<T, AS, TO_TYPE>, PK, TO_TYPE, TO_PK>({
 			pk: this.pk,
 			items: this,
 			join: table,
