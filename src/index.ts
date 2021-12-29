@@ -323,13 +323,22 @@ export class Collection<
 		}
 	}
 
-	// where(predicate: RecursivePartial<T>) {
-	// 	return new Collection<T, PK, JoinType, JoinPK>({
-	// 		pk: this.pk,
-	// 		items: this,
-	// 		conditions: {...this.conditions, predicate}
-	// 	});
-	// }
+	where(predicate: RecursivePartial<CombinedType<T, JoinCollection, JoinAs>>): Collection<CombinedType<T, JoinCollection, JoinAs>, PK> {
+
+		// NOTE: if conditions conflicts with predicate, results will alway be empty.
+		for (const k in this.conditions) {
+			// this will need to get a little more intelligent once we support non-eq matches.
+			if (predicate[k] && predicate[k] != this.conditions[k]) {
+				return new Collection<CombinedType<T, JoinCollection, JoinAs>, PK>({pk: this.pk});
+			}
+		}
+
+		return new Collection<CombinedType<T, JoinCollection, JoinAs>, PK>({
+			pk: this.pk,
+			items: this,
+			conditions: {...this.conditions, ...predicate}
+		});
+	}
 
 	private async matches(item: any, predicate: any): Promise<boolean> {
 		for (const [k, v] of Object.entries(predicate)) {
@@ -375,7 +384,7 @@ export class Collection<
 			as,
 			name = `${this.name}_to_${table.name}`
 		}: JoinOptions<T, CollectionType<TO_COLLECTION>, FK, TO_ID, AS>
-	) {
+	): Collection<CombinedType<T, JoinCollection, JoinAs>, PK, TO_COLLECTION, AS> {
 		return new Collection<CombinedType<T, JoinCollection, JoinAs>, PK, TO_COLLECTION, AS>({
 			pk: this.pk,
 			items: this,

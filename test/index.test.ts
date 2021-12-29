@@ -158,16 +158,16 @@ describe('Collection', () => {
 			]);
 		});
 
-		// test('items by non-pk field as array', async () => {
-		// 	const c = new Collection();
-		// 	await c.put(makeItems(['a','c','b']));
+		test('items by non-pk field as array', async () => {
+			const c = new Collection();
+			await c.put(makeItems(['a','c','b']));
 
-		// 	const results = await c.where({name: 'b name'}).toArray();
+			const results = await c.where({name: 'b name'}).toArray();
 
-		// 	expect(results).toEqual([
-		// 		{id: 'b', name: 'b name'}
-		// 	]);
-		// });
+			expect(results).toEqual([
+				{id: 'b', name: 'b name'}
+			]);
+		});
 
 		// test('items by pk field < comparison', async () => {
 		// 	const c = new Collection();
@@ -226,24 +226,24 @@ describe('Collection', () => {
 				]);
 			})
 
-			// test('can be queried by parent field as array', async () => {
-			// 	const { customerWithOrders } = await makeCustomerOrderRepos();
-			// 	expect(await customerWithOrders.find({name: "Bob Jones"}).toArray()).toEqual(
-			// 		{id: 1, name:"Bob Jones", orders: [
-			// 			{id: "ord-100", customer:1, lineItems: ["a","b","c"]},
-			// 			{id: "ord-101", customer:1, lineItems: ["b","c","d"]}
-			// 		]}
-			// 	);
-			// })
+			test('can be queried by parent field as array', async () => {
+				const { customerWithOrders } = await makeCustomerOrderRepos();
+				expect(await customerWithOrders.where({name: "Bob Jones"}).toArray()).toEqual([
+					{id: 1, name:"Bob Jones", orders: [
+						{id: "ord-100", customer:1, lineItems: ["a","b","c"]},
+						{id: "ord-101", customer:1, lineItems: ["b","c","d"]}
+					]}
+				]);
+			})
 
-			// test('can be queried by child field as array', async () => {
-			// 	const { ordersWithCustomer } = await makeCustomerOrderRepos();
-			// 	let orderResults = await ordersWithCustomer.find({customer: 2}).toArray();
-			// 	expect(orderResults).toEqual([
-			// 		{id: "ord-102", customer: {id: 2, name: "Rob Ross"}, lineItems: ["a","2","z"]},
-			// 		{id: "ord-103", customer: {id: 2, name: "Rob Ross"}, lineItems: ["x","y","z"]}
-			// 	]);
-			// })
+			test('can be queried by child field as array', async () => {
+				const { ordersWithCustomer } = await makeCustomerOrderRepos();
+				let orderResults = await ordersWithCustomer.where({customer: {id: 2}}).toArray();
+				expect(orderResults).toEqual([
+					{id: "ord-102", customer: {id: 2, name: "Rob Ross"}, lineItems: ["a","2","z"]},
+					{id: "ord-103", customer: {id: 2, name: "Rob Ross"}, lineItems: ["x","y","z"]}
+				]);
+			})
 		});
 
 	});
