@@ -1,4 +1,4 @@
-import { Collection } from '../src';
+import { AnyCollection, Collection, CollectionReturnType, CollectionType } from '../src';
 
 type Customer = {
 	id: number;
@@ -130,6 +130,20 @@ describe('Collection', () => {
 			]);
 		});
 
+		test('all items in PK order as an array', async () => {
+			const c = new Collection();
+			await c.put(makeItems(['a','c','b']));
+
+			const results = await c.toArray();
+
+			expect(results).toEqual([
+				{id: 'a', name: 'a name'},
+				{id: 'b', name: 'b name'},
+				{id: 'c', name: 'c name'},
+			]);
+		});
+
+
 		test('items by non-pk field', async () => {
 			const c = new Collection();
 			await c.put(makeItems(['a','c','b']));
@@ -143,6 +157,31 @@ describe('Collection', () => {
 				{id: 'b', name: 'b name'}
 			]);
 		});
+
+		// test('items by non-pk field as array', async () => {
+		// 	const c = new Collection();
+		// 	await c.put(makeItems(['a','c','b']));
+
+		// 	const results = await c.where({name: 'b name'}).toArray();
+
+		// 	expect(results).toEqual([
+		// 		{id: 'b', name: 'b name'}
+		// 	]);
+		// });
+
+		// test('items by pk field < comparison', async () => {
+		// 	const c = new Collection();
+		// 	await c.put(makeItems(['a','c','b']));
+
+		// 	const results = [] as any[];
+		// 	for await (const item of c.find({name: {lt: 'b name' }})) {
+		// 		results.push(item);
+		// 	}
+
+		// 	expect(results).toEqual([
+		// 		{id: 'a', name: 'a name'}
+		// 	]);
+		// });
 	});
 
 	describe('when joined', () => {

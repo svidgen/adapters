@@ -8,6 +8,42 @@ type KeyTypes = number | string;
 type KeyValuePair<K extends KeyTypes, V> = [K, V];
 type SuccessResponse<K extends KeyTypes> = KeyValuePair<K, boolean>;
 
+export type Scalar<T> = T extends Array<infer InnerType> ? InnerType : T;
+export type AnyCollection = Collection<any, any, any, any>;
+export type SimpleTypes = number | string | boolean;
+
+export type CollectionType<T extends AnyCollection> = T extends Collection<infer IT, any, any, any> ? IT: never;
+export type CollectionPK<T extends AnyCollection> = T extends Collection<any, infer PK, any, any> ? PK : never;
+export type CollectionJoinType<T extends AnyCollection> = T extends Collection<any, any, infer JoinType, any> ? JoinType : never;
+export type CollectionJoinAs<T extends AnyCollection> = T extends Collection<any, any, any, infer JoinAs> ? JoinAs : never;
+export type CollectionTypeFields<T extends AnyCollection> = keyof CollectionType<T> | CollectionJoinAs<T>;
+
+// keyof T, but without treating `never` like `any`.
+export type KeysOf<T> = T extends never ? never : keyof T;
+
+// passes string literal unions though; but blocks the general string type.
+export type StringUnion<T> = string extends T ? never : T;
+
+export type CollectionReturnType<T extends AnyCollection> = CombinedType<
+	CollectionType<T>,
+	CollectionJoinType<T>,
+	CollectionJoinAs<T>
+>;
+
+export type CombinedType<
+	T extends any,
+	JoinType extends AnyCollection = never,
+	JoinAs extends string = never
+> = {
+	// AnyCollection -> Collection<any, any, any, any> ... so, we need to ensure
+	// we only enumerate and branch on JoinAs matches when JoinAs is a particular string.
+	[K in StringUnion<JoinAs> | keyof T]:
+		K extends StringUnion<JoinAs> ? CollectionReturnType<JoinType> :
+		K extends keyof T ? T[K] :
+		never
+	;
+}
+
 type WithOptionalFields<T extends Record<string, any>, Fields extends keyof T> = Omit<T, Fields> & Partial<Pick<T, Fields>>;
 
 type WithFieldsRemapped<T, KEYS extends string, TO_TYPE> = {
@@ -16,7 +52,7 @@ type WithFieldsRemapped<T, KEYS extends string, TO_TYPE> = {
 	[K in Exclude<KEYS, keyof T>]: TO_TYPE;
 };
 
-type JoinOptions<FROM, TO, FK extends keyof FROM, TO_ID extends keyof TO, AS extends string> = {
+type JoinOptions<FROM, TO, FK extends keyof FROM, TO_ID extends KeysOf<TO>, AS extends string> = {
 	from?: FK;
 	to?: TO_ID;
 	as?: AS;
@@ -60,6 +96,13 @@ export class SaveError<T> extends Error {
 
 export class MapAdapter<PK_TYPE extends KeyTypes, T> implements Storage<PK_TYPE, T> {
 	items = new Map<PK_TYPE, T>();
+	private indexes = new Map<string, MapAdapter<string, T>>();
+
+	constructor({index = []}: {index?: string[][]} = {}) {
+		for (const idx of index) {
+			this.indexes.set(JSON.stringify(idx), new MapAdapter<string, T>());
+		}
+	}
 
 	async set(key: PK_TYPE, value: T): Promise<boolean>;
 	async set(items: KeyValuePair<PK_TYPE, T>[]): Promise<SuccessResponse<PK_TYPE>[]>;
@@ -71,6 +114,7 @@ export class MapAdapter<PK_TYPE extends KeyTypes, T> implements Storage<PK_TYPE,
 			return Promise.all(set_promises);
 		} else if (value) {
 			if(this.items.set(itemsOrKey, value)) {
+				await this.index(value);
 				return true;
 			} else {
 				return false;
@@ -80,15 +124,24 @@ export class MapAdapter<PK_TYPE extends KeyTypes, T> implements Storage<PK_TYPE,
 		}
 	}
 
+	private async index(item: T) {
+		for await (const idx_name of this.indexes.keys()) {
+			const fields = JSON.parse(idx_name);
+			const indexKey = fields.map((f: any) => (item as any)[f]).join() as string;
+			this.indexes.get(idx_name)!.set(indexKey, item);
+		}
+	}
+
 	async get(key: PK_TYPE) {
 		return this.items.get(key);
 	}
 
 	async * find(predicate: RecursivePartial<T> = {}) {
-		const items = Array.from(this.items.values()).filter(item =>
-			Object.entries(predicate).every(([k,v]) => (item as any)[k] === v)
-		);
-		yield* items;
+		for await (const item of this) {
+			if (item && Object.entries(predicate).every(([k,v]) => (item as any)[k] === v)) {
+				yield item;
+			}
+		}
 	}
 
 	async * keys() {
@@ -108,24 +161,25 @@ export class MapAdapter<PK_TYPE extends KeyTypes, T> implements Storage<PK_TYPE,
 export class Collection<
 	T extends Record<string, any> = Record<string, any>,
 	PK extends keyof T = 'id',
-	JoinType extends Record<string, any> = never,
-	JoinPK extends keyof JoinType = never
-> implements Storage<T[PK], T> {
+	JoinCollection extends AnyCollection = never,
+	JoinAs extends string = never
+> implements Storage<T[PK], CombinedType<T, JoinCollection, JoinAs>> {
 	readonly name: string;
 	readonly pk: PK;
 
 	keygen: () => T[PK];
 
-	joinedTo?: Collection<JoinType, JoinPK>;
+	joinedTo?: AnyCollection;
 	from?: keyof T;
-	to?: keyof JoinType;
-	joinAs?: keyof T;
+	to?: KeysOf<CollectionType<JoinCollection>>;
+	joinAs?: JoinAs;
 	recurse: boolean = true;
 	joinedAsChild?: boolean;
 	joinedAsParent?: boolean;
 	joinedToMany?: boolean;
 
 	private items: Storage<T[PK], T>;
+	conditions: RecursivePartial<T>;
 
 	constructor({
 		name = `unknown_${ulid()}`,
@@ -133,6 +187,7 @@ export class Collection<
 		keygen = ulid as T[PK],
 		pk = 'id' as PK,
 		items = new MapAdapter<T[PK], T>(),
+		conditions = {},
 		join,
 		from,
 		to,
@@ -144,16 +199,18 @@ export class Collection<
 		keygen?: () => T[PK];
 		pk?: PK;
 		items?: Storage<T[PK], T>;
-		join?: Collection<JoinType, JoinPK>;
+		conditions?: RecursivePartial<T>,
+		join?: AnyCollection;
 		from?: keyof T;
-		to?: keyof JoinType;
-		as?: keyof T;
+		to?: KeysOf<CollectionType<JoinCollection>>;
+		as?: JoinAs;
 		recurse?: boolean;
 	} = {}) {
 		this.name = name;
 		this.keygen = keygen;
 		this.pk = pk;
 		this.items = items;
+		this.conditions = conditions;
 		this.from = from;
 		this.to = to;
 		this.joinAs = as;
@@ -174,9 +231,10 @@ export class Collection<
 	// can we use a generator here?
 	// https://tinyurl.com/async-iterator-with-generator
 	async * [Symbol.asyncIterator]() {
-		for await (const item of this.items) {
-			yield item ? this.bless({...item}) : undefined;
-		}
+		yield* this.find(this.conditions);
+		// for await (const item of this.items) {
+		// 	yield item ? this.bless({...item}) : undefined;
+		// }
 	}
 
 	async toArray({max = Number.MAX_SAFE_INTEGER}: {max?: number} = {}) {
@@ -188,7 +246,7 @@ export class Collection<
 		return items;
 	}
 
-	async get(key: T[PK]): Promise<ShapeOf<T>> {
+	async get(key: T[PK]): Promise<CombinedType<T, JoinCollection, JoinAs>> {
 		return this.bless({...(await this.items.get(key))} as ShapeOf<T>);
 	}
 
@@ -236,7 +294,7 @@ export class Collection<
 		}
 	}
 
-	async * find(predicate: RecursivePartial<T>) {
+	async * find(predicate: RecursivePartial<CombinedType<T, JoinCollection, JoinAs>>) {
 		// eventually, we want this to filter in 3 passes:
 		// 1. server-fiterable predicates
 		// 2. client-side, left-hand filterable predicates
@@ -263,7 +321,15 @@ export class Collection<
 				yield blessed_item;
 			}
 		}
-	};
+	}
+
+	// where(predicate: RecursivePartial<T>) {
+	// 	return new Collection<T, PK, JoinType, JoinPK>({
+	// 		pk: this.pk,
+	// 		items: this,
+	// 		conditions: {...this.conditions, predicate}
+	// 	});
+	// }
 
 	private async matches(item: any, predicate: any): Promise<boolean> {
 		for (const [k, v] of Object.entries(predicate)) {
@@ -282,7 +348,7 @@ export class Collection<
 
 	private async bless(item: ShapeOf<T>) {
 		if (this.joinedTo && this.to && this.from && this.joinAs && item[this.from]) {
-			const query = { [this.to]: item[this.from] } as Partial<JoinType>;
+			const query = { [this.to]: item[this.from] } as Partial<CollectionReturnType<JoinCollection>>;
 			const joinedItems = [];
 			for await (const joinedItem of this.joinedTo.find(query)) {
 				joinedItems.push(joinedItem);
@@ -297,22 +363,20 @@ export class Collection<
 	};
 
 	public join<
-		TO_TYPE,
-		TO_PK extends keyof TO_TYPE,
+		TO_COLLECTION extends AnyCollection,
 		FK extends keyof T,
-		TO_ID extends keyof TO_TYPE,
+		TO_ID extends KeysOf<CollectionType<TO_COLLECTION>>,
 		AS extends string
 	>(
-		table: Collection<TO_TYPE, TO_PK>,
+		table: TO_COLLECTION,
 		{
 			from,
 			to,
 			as,
 			name = `${this.name}_to_${table.name}`
-		}: JoinOptions<T, TO_TYPE, FK, TO_ID, AS>
+		}: JoinOptions<T, CollectionType<TO_COLLECTION>, FK, TO_ID, AS>
 	) {
-		// return new Collection<WithFieldsRemapped<T, AS, TO_TYPE | TO_TYPE[TO_PK]>, PK, TO_TYPE, TO_PK>({
-		return new Collection<WithFieldsRemapped<T, AS, TO_TYPE>, PK, TO_TYPE, TO_PK>({
+		return new Collection<CombinedType<T, JoinCollection, JoinAs>, PK, TO_COLLECTION, AS>({
 			pk: this.pk,
 			items: this,
 			join: table,
