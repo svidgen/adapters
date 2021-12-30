@@ -10,7 +10,7 @@ type SuccessResponse<K extends KeyTypes> = KeyValuePair<K, boolean>;
 
 export type Scalar<T> = T extends Array<infer InnerType> ? InnerType : T;
 export type AnyCollection = Collection<any, any, any, any>;
-export type SimpleTypes = number | string | boolean;
+export type ValueTypes = number | bigint | string | boolean;
 
 export type CollectionType<T extends AnyCollection> = T extends Collection<infer IT, any, any, any> ? IT: never;
 export type CollectionPK<T extends AnyCollection> = T extends Collection<any, infer PK, any, any> ? PK : never;
@@ -42,6 +42,32 @@ export type CombinedType<
 		K extends keyof T ? T[K] :
 		never
 	;
+}
+
+export type ExecutiveQuery = {
+	execute<T extends AnyCollection>(collection: T): T;
+	filter<T extends Iterable<T> | Generator<T> | T[]>(items: T): T;
+}
+
+export type FieldQuery<T> = {
+	eq: (value: T) => ExecutiveQuery;
+	ne: (value: T) => ExecutiveQuery;
+	gt: (value: T) => ExecutiveQuery;
+	gte: (value: T) => ExecutiveQuery;
+	lt: (value: T) => ExecutiveQuery;
+	lte: (value: T) => ExecutiveQuery;
+	between: (min: T, max: T) => ExecutiveQuery;
+}
+
+export type QueryType<T> = T extends AnyCollection ? QueryType<CollectionReturnType<T>> : {
+	[K in keyof T]:
+		Scalar<T[K]> extends ValueTypes ? FieldQuery<Scalar<T[K]>> :
+		QueryType<Scalar<T[K]>>
+	;
+} & {
+	and: (builder: (base: QueryType<T>) => ExecutiveQuery[]) => ExecutiveQuery;
+	or: (builder: (base: QueryType<T>) => ExecutiveQuery[]) => ExecutiveQuery;
+	not: (builder: (base: QueryType<T>) => ExecutiveQuery) => ExecutiveQuery;
 }
 
 type WithOptionalFields<T extends Record<string, any>, Fields extends keyof T> = Omit<T, Fields> & Partial<Pick<T, Fields>>;
@@ -165,6 +191,7 @@ export class Collection<
 	JoinAs extends string = never
 > implements Storage<T[PK], CombinedType<T, JoinCollection, JoinAs>> {
 	readonly name: string;
+	readonly model: T | (new (...args: any) => T);
 	readonly pk: PK;
 
 	keygen: () => T[PK];
@@ -183,7 +210,7 @@ export class Collection<
 
 	constructor({
 		name = `unknown_${ulid()}`,
-		model,
+		model = {} as T,
 		keygen = ulid as T[PK],
 		pk = 'id' as PK,
 		items = new MapAdapter<T[PK], T>(),
@@ -207,6 +234,7 @@ export class Collection<
 		recurse?: boolean;
 	} = {}) {
 		this.name = name;
+		this.model = model;
 		this.keygen = keygen;
 		this.pk = pk;
 		this.items = items;
@@ -393,3 +421,13 @@ export class Collection<
 		});
 	}
 }
+
+// export class Query<T> implements QueryType<T> {
+// 	constructor(model: T, base: any = {}) {
+// 		return new Proxy(base, {
+// 			get: (target, property) => {
+// 				const q = {...target};
+// 			}
+// 		}) as Query<T>;
+// 	}
+// }

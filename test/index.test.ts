@@ -1,4 +1,4 @@
-import { AnyCollection, Collection, CollectionReturnType, CollectionType } from '../src';
+import { Collection, QueryType } from '../src';
 
 type Customer = {
 	id: number;
@@ -44,6 +44,14 @@ async function makeCustomerOrderRepos() {
 	let ordersWithCustomer = orderRepo.join(
 		customerRepo, {from: 'customer', to: 'id', as: 'customer', name: 'ordersWithCustomer'}
 	);
+
+	// SCRATCH.
+	// type T = QueryType<typeof customerWithOrders>;
+	// const q: T = {} as T;
+	// q.orders.customer.eq(123);
+	// q.and(iq => [iq.name.eq('something'), iq.orders.lineItems.eq('whatever')]);
+	// const t = q.not(iq => iq.name.eq('something'));
+	// t.execute(ordersWithCustomer);
 
 	return { customerRepo, orderRepo, customerWithOrders, ordersWithCustomer };
 }
@@ -169,14 +177,12 @@ describe('Collection', () => {
 			]);
 		});
 
+		// TODO: make it work!
 		// test('items by pk field < comparison', async () => {
 		// 	const c = new Collection();
 		// 	await c.put(makeItems(['a','c','b']));
 
-		// 	const results = [] as any[];
-		// 	for await (const item of c.find({name: {lt: 'b name' }})) {
-		// 		results.push(item);
-		// 	}
+		// 	const results = await c.where({name: {lt: 'b name' }}).toArray();
 
 		// 	expect(results).toEqual([
 		// 		{id: 'a', name: 'a name'}
