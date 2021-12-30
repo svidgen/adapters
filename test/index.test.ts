@@ -1,4 +1,4 @@
-import { Collection, QueryType } from '../src';
+import { Collection, queryBuilder } from '../src';
 
 type Customer = {
 	id: number;
@@ -19,7 +19,7 @@ function makeItems<PK extends string = 'id'>(ids: string[], idField: PK = 'id' a
 };
 
 async function makeCustomerOrderRepos() {
-	const customerRepo = new Collection<Customer>();
+	const customerRepo = new Collection({model: {} as Customer});
 	const orderRepo = new Collection<Order>();
 
 	let customers = [
@@ -46,11 +46,11 @@ async function makeCustomerOrderRepos() {
 	);
 
 	// SCRATCH.
-	// type T = QueryType<typeof customerWithOrders>;
-	// const q: T = {} as T;
-	// q.orders.customer.eq(123);
-	// q.and(iq => [iq.name.eq('something'), iq.orders.lineItems.eq('whatever')]);
-	// const t = q.not(iq => iq.name.eq('something'));
+	const q = queryBuilder<typeof customerWithOrders>();
+	q.orders.customer.eq(123);
+	q.and(iq => [iq.name.eq('something'), iq.orders.lineItems.eq('whatever')]);
+	const t = q.not(iq => iq.name.eq('something'));
+	console.log(t);
 	// t.execute(ordersWithCustomer);
 
 	return { customerRepo, orderRepo, customerWithOrders, ordersWithCustomer };
@@ -178,11 +178,11 @@ describe('Collection', () => {
 		});
 
 		// TODO: make it work!
-		// test('items by pk field < comparison', async () => {
+		// test.only('items by pk field < comparison', async () => {
 		// 	const c = new Collection();
 		// 	await c.put(makeItems(['a','c','b']));
 
-		// 	const results = await c.where({name: {lt: 'b name' }}).toArray();
+		// 	const results = await c.where(a => a.id.eq(123)).toArray();
 
 		// 	expect(results).toEqual([
 		// 		{id: 'a', name: 'a name'}

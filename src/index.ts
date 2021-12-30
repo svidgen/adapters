@@ -44,11 +44,6 @@ export type CombinedType<
 	;
 }
 
-export type ExecutiveQuery = {
-	execute<T extends AnyCollection>(collection: T): T;
-	filter<T extends Iterable<T> | Generator<T> | T[]>(items: T): T;
-}
-
 export type FieldQuery<T> = {
 	eq: (value: T) => ExecutiveQuery;
 	ne: (value: T) => ExecutiveQuery;
@@ -59,15 +54,15 @@ export type FieldQuery<T> = {
 	between: (min: T, max: T) => ExecutiveQuery;
 }
 
-export type QueryType<T> = T extends AnyCollection ? QueryType<CollectionReturnType<T>> : {
+export type QueryBuilder<T> = T extends AnyCollection ? QueryBuilder<CollectionReturnType<T>> : {
 	[K in keyof T]:
 		Scalar<T[K]> extends ValueTypes ? FieldQuery<Scalar<T[K]>> :
-		QueryType<Scalar<T[K]>>
+		QueryBuilder<Scalar<T[K]>>
 	;
 } & {
-	and: (builder: (base: QueryType<T>) => ExecutiveQuery[]) => ExecutiveQuery;
-	or: (builder: (base: QueryType<T>) => ExecutiveQuery[]) => ExecutiveQuery;
-	not: (builder: (base: QueryType<T>) => ExecutiveQuery) => ExecutiveQuery;
+	and: (builder: (base: QueryBuilder<T>) => ExecutiveQuery[]) => ExecutiveQuery;
+	or: (builder: (base: QueryBuilder<T>) => ExecutiveQuery[]) => ExecutiveQuery;
+	not: (builder: (base: QueryBuilder<T>) => ExecutiveQuery) => ExecutiveQuery;
 }
 
 type WithOptionalFields<T extends Record<string, any>, Fields extends keyof T> = Omit<T, Fields> & Partial<Pick<T, Fields>>;
@@ -103,6 +98,26 @@ interface Storage<PK_TYPE extends string | number, T> {
 	// where(predicate: Partial<T>): Storage<PK_TYPE, T>;
 	[Symbol.asyncIterator](): AsyncIterator<T | undefined>;
 }
+
+const negations = {
+	and: 'or',
+	or: 'and',
+	not: 'and',
+	eq: 'ne',
+	ne: 'eq',
+	gt: 'lte',
+	ge: 'lt',
+	lt: 'gte',
+	le: 'gt',
+	// contains: 'notContains',
+	// notContains: 'contains',
+};
+
+type Operator = keyof typeof negations;
+const operators = Object.keys(negations) as Operator[];
+
+const valueOperators = ['ne', 'eq', 'lt', 'lte', 'gt', 'gte'];
+const groupOperators = ['and', 'or', 'not'];
 
 export function validateHasId<T>(item: T, pk: string) {
 	if (typeof (item as any)[pk] === 'undefined') {
@@ -351,12 +366,14 @@ export class Collection<
 		}
 	}
 
+	//  | QueryBuilderFunction<CombinedType<T, JoinCollection, JoinAs>>
 	where(predicate: RecursivePartial<CombinedType<T, JoinCollection, JoinAs>>): Collection<CombinedType<T, JoinCollection, JoinAs>, PK> {
+		// let concretePredicate = typeof predicate == 'function' ? predicate(queryBuilderFor(this)) : predicate;
+		let concretePredicate = predicate;
 
-		// NOTE: if conditions conflicts with predicate, results will alway be empty.
 		for (const k in this.conditions) {
 			// this will need to get a little more intelligent once we support non-eq matches.
-			if (predicate[k] && predicate[k] != this.conditions[k]) {
+			if (concretePredicate[k] && concretePredicate[k] != this.conditions[k]) {
 				return new Collection<CombinedType<T, JoinCollection, JoinAs>, PK>({pk: this.pk});
 			}
 		}
@@ -364,7 +381,7 @@ export class Collection<
 		return new Collection<CombinedType<T, JoinCollection, JoinAs>, PK>({
 			pk: this.pk,
 			items: this,
-			conditions: {...this.conditions, ...predicate}
+			conditions: {...this.conditions, ...concretePredicate}
 		});
 	}
 
@@ -422,12 +439,92 @@ export class Collection<
 	}
 }
 
-// export class Query<T> implements QueryType<T> {
-// 	constructor(model: T, base: any = {}) {
-// 		return new Proxy(base, {
-// 			get: (target, property) => {
-// 				const q = {...target};
-// 			}
-// 		}) as Query<T>;
-// 	}
+type QueryBuilderFunction<T> = (builder: QueryBuilder<T>) => ExecutiveQuery;
+
+export class ExecutiveQuery {
+	constructor(
+		public operator: Operator,
+		public field: string,
+		public operands: any[],
+		public negate: boolean = false
+	) {}
+
+	execute<C extends AnyCollection>(collection: C): C {
+		return collection;
+	};
+
+	filter<C extends Iterable<C> | Generator<C> | C[]>(items: C): C {
+		return items;
+	};
+
+	copy(extract?: ExecutiveQuery): [ExecutiveQuery, ExecutiveQuery | undefined] {
+		const copied = new ExecutiveQuery(
+			this.operator,
+			this.field,
+			[],
+			this.negate
+		);
+
+		let extractedCopy = extract === this ? copied : undefined;
+
+		this.operands.forEach(o => {
+			if (o instanceof ExecutiveQuery) {
+				const [operandCopy, extractedFromOperand] = o.copy(extract);
+				copied.operands.push(operandCopy);
+				extractedCopy = extractedCopy || extractedFromOperand;
+			} else {
+				copied.operands.push(o);
+			}
+		});
+
+		return [copied, extractedCopy];
+	};
+}
+
+export function queryBuilder<T extends AnyCollection>(
+	/* collection: T */
+	field?: string
+): QueryBuilder<T> {
+	return new Proxy({}, {
+		get: (target: any, property: string) => {
+			const q = {...target};
+			if (groupOperators.includes(property as Operator)) {
+				return (operand: QueryBuilderFunction<any>) => {
+					return new ExecutiveQuery(
+						property as Operator,
+						field!,
+						operand(queryBuilder<any>()) as any
+					);
+				};
+			} else if (valueOperators.includes(property as Operator)) {
+				return (...operands: any[]) => {
+					return new ExecutiveQuery(
+						property as Operator,
+						field!,
+						operands
+					);
+				};
+			} else {
+				return queryBuilder(property);
+			}
+		}
+	}) as QueryBuilder<T>;
+}
+
+// type Customer = {
+// 	id: number;
+// 	name: string;
 // }
+
+// type Order = {
+// 	id: string;
+// 	customer: number;
+// 	lineItems: string[];
+// }
+
+// // type T = QueryBuilder<AnyCollection>;
+// const c = new Collection({model: {} as Customer});
+
+// const q = queryBuilder<typeof c>();
+// q.id.eq(123);
+// q.or(c => [c.id.eq(123), c.name.gt('abc')]);
