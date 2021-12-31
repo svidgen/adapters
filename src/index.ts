@@ -51,7 +51,7 @@ export type FieldQuery<T> = {
 	gte: (value: T) => ExecutiveQuery;
 	lt: (value: T) => ExecutiveQuery;
 	lte: (value: T) => ExecutiveQuery;
-	between: (min: T, max: T) => ExecutiveQuery;
+	// between: (min: T, max: T) => ExecutiveQuery;
 }
 
 export type QueryBuilder<T> = T extends AnyCollection ? QueryBuilder<CollectionReturnType<T>> : {
@@ -275,9 +275,6 @@ export class Collection<
 	// https://tinyurl.com/async-iterator-with-generator
 	async * [Symbol.asyncIterator]() {
 		yield* this.find(this.conditions);
-		// for await (const item of this.items) {
-		// 	yield item ? this.bless({...item}) : undefined;
-		// }
 	}
 
 	async toArray({max = Number.MAX_SAFE_INTEGER}: {max?: number} = {}) {
@@ -444,12 +441,22 @@ type QueryBuilderFunction<T> = (builder: QueryBuilder<T>) => ExecutiveQuery;
 export class ExecutiveQuery {
 	constructor(
 		public operator: Operator,
-		public field: string,
-		public operands: any[],
-		public negate: boolean = false
+		public field: string[],
+		public operands: any | any[]
 	) {}
 
-	execute<C extends AnyCollection>(collection: C): C {
+	execute<C extends AnyCollection>(collection: C, negate: boolean = false): C {
+		if (this.operator === 'not') {
+			if (this.operands instanceof Array) {
+				throw new Error("`not` accepts only a single operand.");
+			}
+			return (this.operands as ExecutiveQuery).execute(collection, !negate);
+		}
+
+		const operator = negate ? negations[this.operator] : this.operator;
+
+		
+
 		return collection;
 	};
 
@@ -461,8 +468,7 @@ export class ExecutiveQuery {
 		const copied = new ExecutiveQuery(
 			this.operator,
 			this.field,
-			[],
-			this.negate
+			[]
 		);
 
 		let extractedCopy = extract === this ? copied : undefined;
@@ -483,7 +489,7 @@ export class ExecutiveQuery {
 
 export function queryBuilder<T extends AnyCollection>(
 	/* collection: T */
-	field?: string
+	field: string[] = []
 ): QueryBuilder<T> {
 	return new Proxy({}, {
 		get: (target: any, property: string) => {
@@ -492,7 +498,7 @@ export function queryBuilder<T extends AnyCollection>(
 				return (operand: QueryBuilderFunction<any>) => {
 					return new ExecutiveQuery(
 						property as Operator,
-						field!,
+						field,
 						operand(queryBuilder<any>()) as any
 					);
 				};
@@ -500,31 +506,13 @@ export function queryBuilder<T extends AnyCollection>(
 				return (...operands: any[]) => {
 					return new ExecutiveQuery(
 						property as Operator,
-						field!,
+						field,
 						operands
 					);
 				};
 			} else {
-				return queryBuilder(property);
+				return queryBuilder([...field, property]);
 			}
 		}
 	}) as QueryBuilder<T>;
 }
-
-// type Customer = {
-// 	id: number;
-// 	name: string;
-// }
-
-// type Order = {
-// 	id: string;
-// 	customer: number;
-// 	lineItems: string[];
-// }
-
-// // type T = QueryBuilder<AnyCollection>;
-// const c = new Collection({model: {} as Customer});
-
-// const q = queryBuilder<typeof c>();
-// q.id.eq(123);
-// q.or(c => [c.id.eq(123), c.name.gt('abc')]);

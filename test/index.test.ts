@@ -45,16 +45,21 @@ async function makeCustomerOrderRepos() {
 		customerRepo, {from: 'customer', to: 'id', as: 'customer', name: 'ordersWithCustomer'}
 	);
 
-	// SCRATCH.
-	const q = queryBuilder<typeof customerWithOrders>();
-	q.orders.customer.eq(123);
-	q.and(iq => [iq.name.eq('something'), iq.orders.lineItems.eq('whatever')]);
-	const t = q.not(iq => iq.name.eq('something'));
-	console.log(t);
-	// t.execute(ordersWithCustomer);
-
 	return { customerRepo, orderRepo, customerWithOrders, ordersWithCustomer };
 }
+
+describe('scratch', () => {
+	test.only('no-op', async () => {
+		const { customerRepo, orderRepo, customerWithOrders, ordersWithCustomer } = await makeCustomerOrderRepos();
+
+		// SCRATCH.
+		const q = queryBuilder<typeof customerWithOrders>();
+		console.log(q.orders.customer.eq(123));
+		console.log(q.and(iq => [iq.name.eq('something'), iq.orders.lineItems.eq('whatever')]));
+		console.log(q.not(iq => iq.name.eq('something')));
+		// t.execute(ordersWithCustomer);
+	});
+});
 
 describe('Collection', () => {
 	describe("can be constructed with", () => {
