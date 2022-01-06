@@ -65,6 +65,8 @@ export type QueryBuilder<T> = T extends AnyCollection ? QueryBuilder<CollectionR
 	not: (builder: (base: QueryBuilder<T>) => ExecutiveQuery) => ExecutiveQuery;
 }
 
+export type QueryBuilderFunction<T> = (builder: QueryBuilder<T>) => ExecutiveQuery;
+
 type WithOptionalFields<T extends Record<string, any>, Fields extends keyof T> = Omit<T, Fields> & Partial<Pick<T, Fields>>;
 
 type WithFieldsRemapped<T, KEYS extends string, TO_TYPE> = {
@@ -94,7 +96,7 @@ interface Storage<PK_TYPE extends string | number, T> {
 	get(key: PK_TYPE): Promise<T | undefined>;
 	set(key: PK_TYPE, value: T): Promise<boolean>;
 	set(items: KeyValuePair<PK_TYPE, T>[]): Promise<SuccessResponse<PK_TYPE>[]>;
-	find(predicate: RecursivePartial<T>): AsyncGenerator<T>;
+	find(predicate: ExecutiveQuery): AsyncGenerator<T>;
 	// where(predicate: Partial<T>): Storage<PK_TYPE, T>;
 	[Symbol.asyncIterator](): AsyncIterator<T | undefined>;
 }
@@ -177,12 +179,15 @@ export class MapAdapter<PK_TYPE extends KeyTypes, T> implements Storage<PK_TYPE,
 		return this.items.get(key);
 	}
 
-	async * find(predicate: RecursivePartial<T> = {}) {
-		for await (const item of this) {
-			if (item && Object.entries(predicate).every(([k,v]) => (item as any)[k] === v)) {
-				yield item;
-			}
-		}
+	async * find(predicate: ExecutiveQuery) {
+		yield* predicate.orchestrate((field: string, operator: Operator, operands: any[]) => {
+
+		});
+		// for await (const item of this) {
+		// 	if (item && Object.entries(predicate).every(([k,v]) => (item as any)[k] === v)) {
+		// 		yield item;
+		// 	}
+		// }
 	}
 
 	async * keys() {
@@ -364,9 +369,9 @@ export class Collection<
 	}
 
 	//  | QueryBuilderFunction<CombinedType<T, JoinCollection, JoinAs>>
-	where(predicate: RecursivePartial<CombinedType<T, JoinCollection, JoinAs>>): Collection<CombinedType<T, JoinCollection, JoinAs>, PK> {
+	where(predicate: QueryBuilderFunction<this>): Collection<CombinedType<T, JoinCollection, JoinAs>, PK> {
 		// let concretePredicate = typeof predicate == 'function' ? predicate(queryBuilderFor(this)) : predicate;
-		let concretePredicate = predicate;
+		let concretePredicate = predicate(queryBuilder<this>());
 
 		for (const k in this.conditions) {
 			// this will need to get a little more intelligent once we support non-eq matches.
@@ -436,16 +441,14 @@ export class Collection<
 	}
 }
 
-type QueryBuilderFunction<T> = (builder: QueryBuilder<T>) => ExecutiveQuery;
-
 export class ExecutiveQuery {
 	constructor(
 		public operator: Operator,
-		public field: string[],
-		public operands: any | any[]
+		public operands: any | any[],
+		public field?: string,
 	) {}
 
-	execute<C extends AnyCollection>(collection: C, negate: boolean = false): C {
+	async execute<C extends AnyCollection>(collection: C, negate: boolean = false): CollectionReturnType<C>[] {
 		if (this.operator === 'not') {
 			if (this.operands instanceof Array) {
 				throw new Error("`not` accepts only a single operand.");
@@ -455,25 +458,59 @@ export class ExecutiveQuery {
 
 		const operator = negate ? negations[this.operator] : this.operator;
 
-		
+		if (this.operator === 'and') {
+			// TODO: optimize. determine lowest cost base set.
+			return this.filter(collection.where(this.operands[0]]));
+		} else if (this.operator === 'or') {
+		}
 
 		return collection;
 	};
 
-	filter<C extends Iterable<C> | Generator<C> | C[]>(items: C): C {
-		return items;
+	orchestrate<T, PK_TYPE extends string | number>(adapter: Storage<PK_TYPE, T>): T[] {
+
+	}
+
+	async filter<C extends AnyCollection>(items: C) {
+		return (await items.toArray()).filter(item => this.matches(item));
 	};
+
+	matches(item: any) {
+		if (!this.field) throw new Error("Field must be specified!");
+		const v = this.field && item[this.field];
+		const operations = {
+			eq: () => v === this.operands[0],
+			ne: () => v !== this.operands[0],
+			gt: () => v > this.operands[0],
+			ge: () => v >= this.operands[0],
+			lt: () => v < this.operands[0],
+			le: () => v <= this.operands[0],
+			contains: () => String(v).indexOf(this.operands[0]) > -1,
+			notContains: () => String(v).indexOf(this.operands[0]) === -1,
+			beginsWith: () => String(v).startsWith(this.operands[0]),
+			between: () => v >= this.operands[0] && v <= this.operands[1],
+			'and': (): boolean => (this.operands as ExecutiveQuery[]).every(q => q.matches(item)),
+			'or': (): boolean => (this.operands as ExecutiveQuery[]).some(q => q.matches(item)),
+			'not': (): boolean => !(this.operands as ExecutiveQuery).matches(item)
+		};
+		const operation = operations[this.operator];
+		if (operation) {
+			return operation();
+		} else {
+			throw new Error(`Invalid operator given: ${this.operator}`);
+		}
+	}
 
 	copy(extract?: ExecutiveQuery): [ExecutiveQuery, ExecutiveQuery | undefined] {
 		const copied = new ExecutiveQuery(
 			this.operator,
-			this.field,
-			[]
+			[],
+			this.field
 		);
 
 		let extractedCopy = extract === this ? copied : undefined;
 
-		this.operands.forEach(o => {
+		this.operands.forEach((o: any) => {
 			if (o instanceof ExecutiveQuery) {
 				const [operandCopy, extractedFromOperand] = o.copy(extract);
 				copied.operands.push(operandCopy);
@@ -489,29 +526,34 @@ export class ExecutiveQuery {
 
 export function queryBuilder<T extends AnyCollection>(
 	/* collection: T */
-	field: string[] = []
+	head?: ExecutiveQuery,
+	tail?: ExecutiveQuery
 ): QueryBuilder<T> {
 	return new Proxy({}, {
 		get: (target: any, property: string) => {
-			const q = {...target};
+			head = head || new ExecutiveQuery('and', []);
+			tail = tail || head;
+
 			if (groupOperators.includes(property as Operator)) {
 				return (operand: QueryBuilderFunction<any>) => {
-					return new ExecutiveQuery(
+					tail?.operands.push(new ExecutiveQuery(
 						property as Operator,
-						field,
 						operand(queryBuilder<any>()) as any
-					);
+					));
+					return head;
 				};
 			} else if (valueOperators.includes(property as Operator)) {
 				return (...operands: any[]) => {
-					return new ExecutiveQuery(
+					tail?.operands.push(new ExecutiveQuery(
 						property as Operator,
-						field,
 						operands
-					);
+					));
+					return head;
 				};
 			} else {
-				return queryBuilder([...field, property]);
+				const newTail = new ExecutiveQuery('and', [], property);
+				tail.operands.push(newTail);
+				return queryBuilder(head, newTail);
 			}
 		}
 	}) as QueryBuilder<T>;
